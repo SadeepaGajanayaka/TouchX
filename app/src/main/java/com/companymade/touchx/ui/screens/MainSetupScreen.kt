@@ -92,14 +92,6 @@ fun MainSetupScreen(
                         modifier = Modifier.background(Color(0xFF222222))
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Instructions", color = Color.White) },
-                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.White) },
-                            onClick = {
-                                showMenu = false
-                                showInstructions = true
-                            }
-                        )
-                        DropdownMenuItem(
                             text = { Text("Help", color = Color.White) },
                             leadingIcon = { Icon(Icons.Default.Help, contentDescription = null, tint = Color.White) },
                             onClick = {
@@ -227,6 +219,7 @@ fun HelpDialog(onClose: () -> Unit) {
                         HelpItem("Screen Overlay", "If the lock screen doesn't show, re-verify the 'Display over other apps' permission.")
                         HelpItem("Battery", "Set battery optimization to 'Unrestricted' so Android doesn't stop your protection.")
                         HelpItem("Gestures", "Use high-contrast features in your photos (like eyes, buttons, or edges) to help you remember your password.")
+                        HelpItem("⚠️ Honor / Huawei / Xiaomi", "Go to Settings > Apps > TouchX > Other Permissions and enable:\n• Show on Lock Screen\n• Display pop-up windows while running in background\n• Auto-launch\nWithout these, the lock screen will NOT appear.")
                     }
                     Spacer(Modifier.height(24.dp))
                     Button(

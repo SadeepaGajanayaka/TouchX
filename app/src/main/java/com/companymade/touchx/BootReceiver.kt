@@ -12,7 +12,7 @@ class BootReceiver : BroadcastReceiver() {
             val isLocked = sharedPref.getBoolean("is_locked", false)
             val hasImage = sharedPref.getString("image_uri", null) != null
 
-            if (isLocked && hasImage) {
+            if (hasImage) {
                 val serviceIntent = Intent(context, LockService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)

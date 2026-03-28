@@ -13,13 +13,31 @@ class LockService : Service() {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_SCREEN_OFF || intent.action == Intent.ACTION_SCREEN_ON) {
-                val sharedPref = context.getSharedPreferences("picture_lock", Context.MODE_PRIVATE)
-                val isLocked = sharedPref.getBoolean("is_locked", false)
-                val hasImage = sharedPref.getString("image_uri", null) != null
+            val sharedPref = context.getSharedPreferences("picture_lock", Context.MODE_PRIVATE)
+            val hasImage = sharedPref.getString("image_uri", null) != null
+            
+            if (!hasImage) return
 
-                if (isLocked && hasImage) {
-                    refreshNotification()
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    // Auto-lock whenever screen goes off
+                    sharedPref.edit().putBoolean("is_locked", true).apply()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    val isLocked = sharedPref.getBoolean("is_locked", false)
+                    if (isLocked) {
+                        val lockIntent = Intent(context, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or 
+                                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or 
+                                     Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        }
+                        try {
+                            context.startActivity(lockIntent)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                        refreshNotification()
+                    }
                 }
             }
         }

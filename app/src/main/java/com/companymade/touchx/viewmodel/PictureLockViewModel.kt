@@ -73,6 +73,7 @@ class PictureLockViewModel(context: Context) : ViewModel() {
     }
 
     fun updatePermissionStates(context: Context) {
+        _isLocked.value = sharedPref.getBoolean("is_locked", false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             _hasOverlayPermission.value = android.provider.Settings.canDrawOverlays(context)
         }

@@ -26,6 +26,7 @@
             android:label="@string/app_name"
             android:launchMode="singleInstance"
             android:showWhenLocked="true"
+            android:showOnLockScreen="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.TouchX">
             <intent-filter>

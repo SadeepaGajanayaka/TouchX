@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -31,10 +32,13 @@ class MainActivity : ComponentActivity() {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         } else {
+            @Suppress("DEPRECATION")
             window.addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
             )
         }
 
@@ -50,6 +54,7 @@ class MainActivity : ComponentActivity() {
             val isLocked by viewModel.isLocked.collectAsState()
             val hasOverlay by viewModel.hasOverlayPermission.collectAsState()
             val isBatteryOptimized by viewModel.isBatteryOptimized.collectAsState()
+            val imageUri by viewModel.imageUri.collectAsState()
 
             DisposableEffect(Lifecycle.Event.ON_RESUME) {
                 val observer = LifecycleEventObserver { _, event ->
@@ -61,8 +66,8 @@ class MainActivity : ComponentActivity() {
                 onDispose { lifecycle.removeObserver(observer) }
             }
             
-            LaunchedEffect(isLocked) {
-                if (isLocked && viewModel.imageUri.value != null) {
+            LaunchedEffect(imageUri) {
+                if (imageUri != null) {
                     val serviceIntent = Intent(context, LockService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
@@ -73,14 +78,20 @@ class MainActivity : ComponentActivity() {
                     context.stopService(Intent(context, LockService::class.java))
                 }
             }
+
+            BackHandler(enabled = isLocked) {
+                // Consume back press when locked to prevent exiting the lock screen
+            }
             
             TouchXApp(viewModel)
         }
     }
 
-    override fun onBackPressed() {
-        if (!viewModel.isLocked.value) {
-            super.onBackPressed()
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
         }
     }
 }
@@ -154,8 +165,35 @@ fun TouchXApp(viewModel: PictureLockViewModel) {
                         }
                     },
                     onRequestAutoStart = {
-                        val intent = Intent(Settings.ACTION_SETTINGS)
-                        context.startActivity(intent)
+                        val manufacturer = Build.MANUFACTURER.lowercase()
+                        val intents = mutableListOf<Intent>()
+                        when {
+                            manufacturer.contains("huawei") || manufacturer.contains("honor") -> {
+                                intents.add(Intent().setComponent(ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")))
+                                intents.add(Intent().setComponent(ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity")))
+                            }
+                            manufacturer.contains("xiaomi") || manufacturer.contains("redmi") -> {
+                                intents.add(Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
+                            }
+                            manufacturer.contains("oppo") || manufacturer.contains("realme") -> {
+                                intents.add(Intent().setComponent(ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity")))
+                            }
+                            manufacturer.contains("vivo") -> {
+                                intents.add(Intent().setComponent(ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity")))
+                            }
+                        }
+                        val launched = intents.any { intent ->
+                            try {
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(intent)
+                                true
+                            } catch (_: Exception) { false }
+                        }
+                        if (!launched) {
+                            val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            fallback.data = Uri.parse("package:${context.packageName}")
+                            context.startActivity(fallback)
+                        }
                     }
                 )
             }

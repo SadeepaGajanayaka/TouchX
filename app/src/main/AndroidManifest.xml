@@ -28,7 +28,7 @@
             android:showWhenLocked="true"
             android:showOnLockScreen="true"
             android:turnScreenOn="true"
-            android:theme="@style/Theme.TouchX">
+            android:theme="@style/Theme.TouchX.NoAnimation">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

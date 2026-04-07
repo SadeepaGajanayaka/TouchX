@@ -20,7 +20,6 @@ class LockService : Service() {
 
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> {
-                    // Auto-lock whenever screen goes off
                     sharedPref.edit().putBoolean("is_locked", true).apply()
                 }
                 Intent.ACTION_SCREEN_ON -> {
@@ -29,7 +28,9 @@ class LockService : Service() {
                         val lockIntent = Intent(context, MainActivity::class.java).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or 
                                      Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or 
-                                     Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                     Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                            putExtra("FROM_LOCK_SERVICE", true)
                         }
                         try {
                             context.startActivity(lockIntent)
@@ -64,7 +65,6 @@ class LockService : Service() {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
-
         refreshNotification()
     }
 

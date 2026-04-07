@@ -2,4 +2,10 @@
 <resources>
 
     <style name="Theme.TouchX" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.TouchX.NoAnimation" parent="Theme.TouchX">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
 </resources>

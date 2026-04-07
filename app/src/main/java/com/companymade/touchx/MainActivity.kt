@@ -24,9 +24,18 @@ import com.companymade.touchx.viewmodel.PictureLockViewModel
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: PictureLockViewModel
+    private var fromLockService = false
+    private var wasLockedOnStart = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        fromLockService = intent?.getBooleanExtra("FROM_LOCK_SERVICE", false) == true
+        
+        // Suppress app opening animation when triggered from service
+        if (fromLockService) {
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -41,7 +50,12 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
             )
         }
+        
+        // Ensure the window fits the screen perfectly without flicker
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+                       WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
 
+        // Dismiss the native swipe-to-unlock immediately
         val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             km.requestDismissKeyguard(this, null)
@@ -55,6 +69,23 @@ class MainActivity : ComponentActivity() {
             val hasOverlay by viewModel.hasOverlayPermission.collectAsState()
             val isBatteryOptimized by viewModel.isBatteryOptimized.collectAsState()
             val imageUri by viewModel.imageUri.collectAsState()
+            val gestures by viewModel.gestures.collectAsState()
+
+            // Initialize correct state immediately to avoid flipping
+            var appState by remember { 
+                mutableStateOf(
+                    when {
+                        fromLockService && isLocked && imageUri != null && gestures.isNotEmpty() -> AppState.LOCKED
+                        fromLockService -> AppState.SETUP
+                        else -> AppState.SPLASH
+                    }
+                )
+            }
+
+            // Track that user was locked when activity started
+            LaunchedEffect(Unit) {
+                wasLockedOnStart = isLocked
+            }
 
             DisposableEffect(Lifecycle.Event.ON_RESUME) {
                 val observer = LifecycleEventObserver { _, event ->
@@ -79,16 +110,47 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // When user successfully unlocks, dismiss keyguard and finish if from service
+            LaunchedEffect(isLocked) {
+                if (wasLockedOnStart && !isLocked) {
+                    // Dismiss the native swipe-to-unlock keyguard
+                    val kmInner = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        kmInner.requestDismissKeyguard(context as ComponentActivity, null)
+                    }
+                    if (fromLockService) {
+                        fromLockService = false
+                        wasLockedOnStart = false
+                        val act = context as? ComponentActivity
+                        act?.finishAndRemoveTask()
+                        @Suppress("DEPRECATION")
+                        act?.overridePendingTransition(0, 0)
+                    }
+                }
+            }
+
             BackHandler(enabled = isLocked) {
-                // Consume back press when locked to prevent exiting the lock screen
+                // Consume back press when locked
             }
             
-            TouchXApp(viewModel)
+            TouchXApp(viewModel, fromLockService, appState)
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        fromLockService = intent.getBooleanExtra("FROM_LOCK_SERVICE", false)
+        if (fromLockService) {
+            wasLockedOnStart = true
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+            
+            // Re-dismiss keyguard on every new intent from service
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                km.requestDismissKeyguard(this, null)
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -97,8 +159,12 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun TouchXApp(viewModel: PictureLockViewModel) {
-    var appState by remember { mutableStateOf(AppState.SPLASH) }
+fun TouchXApp(
+    viewModel: PictureLockViewModel, 
+    fromService: Boolean = false,
+    initialState: AppState = AppState.SPLASH
+) {
+    var appState by remember(initialState) { mutableStateOf(initialState) }
     val context = LocalContext.current
     val imageUri by viewModel.imageUri.collectAsState()
     val isLocked by viewModel.isLocked.collectAsState()
@@ -119,7 +185,8 @@ fun TouchXApp(viewModel: PictureLockViewModel) {
                 else -> AppState.SETUP
             },
             transitionSpec = {
-                fadeIn(animationSpec = tween(500)) togetherWith fadeOut(animationSpec = tween(500))
+                val duration = if (fromService) 0 else 500
+                fadeIn(animationSpec = tween(duration)) togetherWith fadeOut(animationSpec = tween(duration))
             },
             label = "AppScreenTransition"
         ) { state ->
@@ -130,7 +197,21 @@ fun TouchXApp(viewModel: PictureLockViewModel) {
                 AppState.LOCKED -> PictureLockScreen(
                     imageUri = imageUri!!,
                     gestures = gestures,
-                    onUnlock = { viewModel.setLock(false) }
+                    onUnlock = { 
+                        if (fromService) {
+                            // Write directly to SharedPreferences WITHOUT updating ViewModel
+                            // so Compose never recomposes to show the dashboard
+                            context.getSharedPreferences("picture_lock", Context.MODE_PRIVATE)
+                                .edit().putBoolean("is_locked", false).apply()
+                            (context as? ComponentActivity)?.let { act ->
+                                act.finishAndRemoveTask()
+                                @Suppress("DEPRECATION")
+                                act.overridePendingTransition(0, 0)
+                            }
+                        } else {
+                            viewModel.setLock(false)
+                        }
+                    }
                 )
                 AppState.SET_PASSWORD -> SetPasswordScreen(
                     imageUri = tempSettingUri!!,

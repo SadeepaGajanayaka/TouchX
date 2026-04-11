@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class GestureType { TAP, LINE }
-enum class GestureMode { TAPS_ONLY, FREEHAND }
+enum class GestureMode { TAPS_ONLY, LINE }
 
 data class PasswordGesture(
     val type: GestureType,
@@ -29,7 +29,10 @@ class PictureLockViewModel(context: Context) : ViewModel() {
     val imageUri: StateFlow<Uri?> = _imageUri.asStateFlow()
 
     private val _gestureMode = MutableStateFlow(
-        GestureMode.valueOf(sharedPref.getString("gesture_mode", GestureMode.FREEHAND.name)!!)
+        run {
+            val saved = sharedPref.getString("gesture_mode", GestureMode.LINE.name)
+            try { GestureMode.valueOf(saved!!) } catch (e: Exception) { GestureMode.LINE }
+        }
     )
     val gestureMode: StateFlow<GestureMode> = _gestureMode.asStateFlow()
 
@@ -62,7 +65,7 @@ class PictureLockViewModel(context: Context) : ViewModel() {
         for (i in 1..count) {
             val typeStr = sharedPref.getString("g${i}_type", null) ?: continue
             list.add(PasswordGesture(
-                type = GestureType.valueOf(typeStr),
+                type = try { GestureType.valueOf(typeStr) } catch(e: Exception) { GestureType.TAP },
                 xStart = sharedPref.getFloat("g${i}_xStart", -1f),
                 yStart = sharedPref.getFloat("g${i}_yStart", -1f),
                 xEnd = sharedPref.getFloat("g${i}_xEnd", -1f),
@@ -85,7 +88,7 @@ class PictureLockViewModel(context: Context) : ViewModel() {
 
     fun setLock(locked: Boolean) {
         _isLocked.value = locked
-        sharedPref.edit().putBoolean("is_locked", locked).apply()
+        sharedPref.edit().putBoolean("is_locked", locked).commit()
     }
 
     fun updateGestureSettings(mode: GestureMode, count: Int) {

@@ -33,6 +33,10 @@ import coil.compose.rememberAsyncImagePainter
 import com.companymade.touchx.viewmodel.GestureMode
 import com.companymade.touchx.viewmodel.GestureType
 import com.companymade.touchx.viewmodel.PasswordGesture
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import kotlin.math.sqrt
 
 @Composable
@@ -90,6 +94,12 @@ fun SetPasswordScreen(
     var dragCurrent by remember { mutableStateOf<Offset?>(null) }
     
     var showSuccessAlert by remember { mutableStateOf(false) }
+    
+    // ANIMATION & FLOW STATES
+    var isReviewing by remember { mutableIntStateOf(-1) } // -1 = input, 0..N = reviewing index
+    val reviewAnimProgress = remember { Animatable(0f) }
+    var pendingGesture by remember { mutableStateOf<PasswordGesture?>(null) }
+    val scope = rememberCoroutineScope()
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Image(
@@ -100,42 +110,44 @@ fun SetPasswordScreen(
                 .pointerInput(gestures.size, gestureMode) {
                     if (gestures.size < targetCount) {
                         awaitPointerEventScope {
-                            val down = awaitFirstDown()
-                            dragStart = down.position
-                            dragCurrent = down.position
-                            
                             while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull() ?: break
+                                val down = awaitFirstDown()
+                                dragStart = down.position
+                                dragCurrent = down.position
                                 
-                                if (change.changedToUp()) {
-                                    val s = dragStart ?: return@awaitPointerEventScope
-                                    val e = if (gestureMode == GestureMode.TAPS_ONLY) s else (dragCurrent ?: s)
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
                                     
-                                    val dx = e.x - s.x
-                                    val dy = e.y - s.y
-                                    val distance = sqrt(dx*dx + dy*dy)
-                                    
-                                    val type = if (distance < 50f || gestureMode == GestureMode.TAPS_ONLY) GestureType.TAP else GestureType.LINE
-                                    
-                                    val newGesture = PasswordGesture(
-                                        type = type,
-                                        xStart = s.x / containerSize.width,
-                                        yStart = s.y / containerSize.height,
-                                        xEnd = if (type == GestureType.TAP) s.x / containerSize.width else e.x / containerSize.width,
-                                        yEnd = if (type == GestureType.TAP) s.y / containerSize.height else e.y / containerSize.height
-                                    )
-                                    
-                                    gestures = gestures + newGesture
-                                    dragStart = null
-                                    dragCurrent = null
-                                    break
-                                } else {
-                                    if (gestureMode == GestureMode.FREEHAND) {
-                                        dragCurrent = change.position
-                                    }
-                                    if (event.type == PointerEventType.Move) {
-                                        change.consume()
+                                    if (change.changedToUp()) {
+                                        val s = dragStart ?: return@awaitPointerEventScope
+                                        val e = if (gestureMode == GestureMode.TAPS_ONLY) s else (dragCurrent ?: s)
+                                        
+                                        val dx = e.x - s.x
+                                        val dy = e.y - s.y
+                                        val distance = sqrt(dx*dx + dy*dy)
+                                        
+                                        val type = if (distance < 50f || gestureMode == GestureMode.TAPS_ONLY) GestureType.TAP else GestureType.LINE
+                                        
+                                        val newGesture = PasswordGesture(
+                                            type = type,
+                                            xStart = s.x / containerSize.width,
+                                            yStart = s.y / containerSize.height,
+                                            xEnd = if (type == GestureType.TAP) s.x / containerSize.width else e.x / containerSize.width,
+                                            yEnd = if (type == GestureType.TAP) s.y / containerSize.height else e.y / containerSize.height
+                                        )
+                                        
+                                        pendingGesture = newGesture
+                                        dragStart = null
+                                        dragCurrent = null
+                                        break // Exit movement loop, back to FirstDown
+                                    } else {
+                                        if (gestureMode == GestureMode.LINE) {
+                                            dragCurrent = change.position
+                                        }
+                                        if (event.type == PointerEventType.Move) {
+                                            change.consume()
+                                        }
                                     }
                                 }
                             }
@@ -145,69 +157,52 @@ fun SetPasswordScreen(
             contentScale = ContentScale.Crop
         )
 
-        // GESTURE MARKS - PREMIUM ADAPTIVE GLOW
+        // GESTURE MARKS - DYNAMIC REVEAL
         Canvas(modifier = Modifier.fillMaxSize()) {
-            gestures.forEach { g ->
+            val toDraw = if (isReviewing != -1) {
+                gestures.getOrNull(isReviewing)?.let { listOf(it) } ?: emptyList()
+            } else {
+                pendingGesture?.let { listOf(it) } ?: emptyList()
+            }
+            
+            toDraw.forEach { g ->
                 val adaptiveColor = getAdaptiveColor(g.xStart, g.yStart)
-                val glowColor = adaptiveColor.copy(alpha = 0.4f)
                 val start = Offset(g.xStart * size.width, g.yStart * size.height)
                 val end = Offset(g.xEnd * size.width, g.yEnd * size.height)
+                
+                val progress = if (isReviewing != -1) reviewAnimProgress.value else 1f
+                val animatedEnd = Offset(
+                    start.x + (end.x - start.x) * progress,
+                    start.y + (end.y - start.y) * progress
+                )
 
                 if (g.type == GestureType.TAP) {
-                    // Outer Soft Glow
-                    drawCircle(
-                        color = adaptiveColor.copy(alpha = 0.2f),
-                        center = start,
-                        radius = 40f
-                    )
-                    // Medium Ring
-                    drawCircle(
-                        color = adaptiveColor.copy(alpha = 0.4f),
-                        center = start,
-                        radius = 28f,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f)
-                    )
-                    // High-Intensity Core
-                    drawCircle(
-                        color = adaptiveColor,
-                        center = start,
-                        radius = 14f
-                    )
+                    val tapAlpha = if (isReviewing != -1) progress else 1f
+                    drawCircle(color = adaptiveColor.copy(alpha = 0.2f * tapAlpha), center = start, radius = 40f)
+                    drawCircle(color = adaptiveColor.copy(alpha = 0.4f * tapAlpha), center = start, radius = 28f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f))
+                    drawCircle(color = adaptiveColor.copy(alpha = tapAlpha), center = start, radius = 14f)
                 } else {
                     val energyBrush = androidx.compose.ui.graphics.Brush.linearGradient(
                         colors = listOf(adaptiveColor, adaptiveColor.copy(alpha = 0.4f)),
-                        start = start,
-                        end = end
+                        start = start, end = animatedEnd
                     )
-                    // Outer soft glow line
-                    drawLine(
-                        color = adaptiveColor.copy(alpha = 0.15f),
-                        start = start,
-                        end = end,
-                        strokeWidth = 30f,
-                        cap = StrokeCap.Round
-                    )
-                    // Main energy line with gradient
-                    drawLine(
-                        brush = energyBrush,
-                        start = start,
-                        end = end,
-                        strokeWidth = 12f,
-                        cap = StrokeCap.Round
-                    )
-                    // Precise core line
-                    drawLine(
-                        color = adaptiveColor.copy(alpha = 0.9f),
-                        start = start,
-                        end = end,
-                        strokeWidth = 3f,
-                        cap = StrokeCap.Round
-                    )
+                    drawLine(color = adaptiveColor.copy(alpha = 0.15f), start = start, end = animatedEnd, strokeWidth = 30f, cap = StrokeCap.Round)
+                    drawLine(brush = energyBrush, start = start, end = animatedEnd, strokeWidth = 12f, cap = StrokeCap.Round)
+                    drawLine(color = adaptiveColor.copy(alpha = 0.9f), start = start, end = animatedEnd, strokeWidth = 3f, cap = StrokeCap.Round)
                     
-                    // Cap circles for the line
                     drawCircle(adaptiveColor, radius = 8f, center = start)
-                    drawCircle(adaptiveColor, radius = 8f, center = end)
+                    if (progress > 0.95f) drawCircle(adaptiveColor, radius = 8f, center = end)
                 }
+            }
+            
+            // Also draw current drag
+            dragStart?.let { s ->
+                val adaptiveColor = getAdaptiveColor(s.x / size.width, s.y / size.height)
+                val e = dragCurrent ?: s
+                if (gestureMode == GestureMode.LINE) {
+                    drawLine(color = adaptiveColor.copy(alpha = 0.5f), start = s, end = e, strokeWidth = 8f, cap = StrokeCap.Round)
+                }
+                drawCircle(color = adaptiveColor.copy(alpha = 0.5f), center = s, radius = 20f)
             }
         }
 
@@ -225,51 +220,106 @@ fun SetPasswordScreen(
             }
         }
 
-        // FOOTER - Dynamic visibility
-        if (gestures.isNotEmpty()) {
-            Column(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp, start = 24.dp, end = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+        // FOOTER - Always visible for guidance
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp, start = 24.dp, end = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // PROGRESS DOTS
+            Row(
+                modifier = Modifier.padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "Gesture ${gestures.size} of $targetCount",
-                    color = Color.White,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(32.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                repeat(targetCount) { index ->
+                    val isDone = index < gestures.size
+                    val isCurrent = index == gestures.size
+                    val dotColor = if (isDone) Color.White else if (isCurrent && pendingGesture != null) Color.White.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.2f)
+                    val dotSize = if (isCurrent) 12.dp else 8.dp
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(dotSize)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(dotColor)
+                    )
+                }
+            }
+
+            Text(
+                text = when {
+                    isReviewing != -1 -> "Reviewing..."
+                    pendingGesture != null -> "Confirm this gesture"
+                    gestures.size < targetCount -> "Draw gesture ${gestures.size + 1}"
+                    else -> "All gestures added"
+                },
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // CLEAR / UNDO BUTTON
+                Button(
+                    onClick = { 
+                        if (pendingGesture != null) {
+                            pendingGesture = null
+                        } else if (gestures.isNotEmpty()) {
+                            gestures = gestures.dropLast(1)
+                        }
+                    },
+                    enabled = (pendingGesture != null || gestures.isNotEmpty()) && isReviewing == -1,
+                    modifier = Modifier.weight(1f).height(64.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White.copy(alpha = 0.1f), 
+                        contentColor = Color.White
+                    )
                 ) {
-                    Button(
-                        onClick = { gestures = emptyList() },
-                        modifier = Modifier.weight(1f).height(72.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB0B0B0), contentColor = Color.Black)
-                    ) {
-                        Text("Clear", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    }
-                    Button(
-                        onClick = { 
-                            if (gestures.size == targetCount) {
+                    Text(if (pendingGesture != null) "Clear" else "Undo", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                
+                // NEXT / FINISH BUTTON
+                Button(
+                    onClick = { 
+                        val pg = pendingGesture ?: return@Button
+                        val newList = gestures + pg
+                        gestures = newList
+                        pendingGesture = null
+                        
+                        if (newList.size == targetCount) {
+                            scope.launch {
+                                // Short delay to let user see the final confirmation
+                                delay(300)
+                                for (i in newList.indices) {
+                                    isReviewing = i
+                                    reviewAnimProgress.snapTo(0f)
+                                    reviewAnimProgress.animateTo(1f, tween(600))
+                                    delay(200)
+                                }
+                                isReviewing = -1
                                 showSuccessAlert = true
                             }
-                        },
-                        enabled = gestures.size >= 1,
-                        modifier = Modifier.weight(1f).height(72.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (gestures.size == targetCount) Color.White else Color(0xFFB0B0B0), 
-                            contentColor = Color.Black
-                        )
-                    ) {
-                        Text(
-                            text = if (gestures.size == targetCount) "Finish" else "Next",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                    }
+                        }
+                    },
+                    enabled = pendingGesture != null && isReviewing == -1,
+                    modifier = Modifier.weight(1f).height(64.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (pendingGesture != null) Color.White else Color.White.copy(alpha = 0.1f), 
+                        contentColor = if (pendingGesture != null) Color.Black else Color.White.copy(alpha = 0.4f)
+                    )
+                ) {
+                    val isFinal = gestures.size + 1 == targetCount
+                    Text(
+                        text = if (isFinal) "Finish" else "Next",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
                 }
             }
         }

@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -25,6 +27,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -66,6 +69,14 @@ fun PictureLockScreen(
     
     var dragStart by remember { mutableStateOf<Offset?>(null) }
     var dragCurrent by remember { mutableStateOf<Offset?>(null) }
+    
+    var isUnlocking by remember { mutableStateOf(false) }
+    val unlockAlpha by animateFloatAsState(
+        targetValue = if (isUnlocking) 0f else 1f,
+        animationSpec = tween(durationMillis = 300),
+        label = "UnlockAlpha",
+        finishedListener = { alphaValue -> if (alphaValue == 0f) onUnlock() }
+    )
     
     var timeText by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
@@ -132,7 +143,11 @@ fun PictureLockScreen(
         return if (luminance > 0.5) Color.Black else Color.White
     }
     
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier
+        .fillMaxSize()
+        .graphicsLayer { alpha = unlockAlpha }
+        .background(Color.Black)
+    ) {
         AsyncImage(
             model = imageUri,
             contentDescription = "Lock",
@@ -184,7 +199,7 @@ fun PictureLockScreen(
                                         if (currentStep == gestures.size - 1) {
                                             scope.launch {
                                                 delay(400)
-                                                onUnlock()
+                                                isUnlocking = true
                                             }
                                         } else {
                                             currentStep++

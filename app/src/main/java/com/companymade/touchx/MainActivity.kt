@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var viewModel: PictureLockViewModel
     private var fromLockService = false
     private var wasLockedOnStart = false
+    private var keyguardLock: KeyguardManager.KeyguardLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,29 +38,19 @@ class MainActivity : ComponentActivity() {
             overridePendingTransition(0, 0)
         }
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
-            )
-        }
-        
+        applyLockScreenFlags()
+
         // Ensure the window fits the screen perfectly without flicker
         window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        
+        // Optimize window for lock screen display
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
 
         // Dismiss the native swipe-to-unlock immediately
-        val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            km.requestDismissKeyguard(this, null)
-        }
+        dismissKeyguard()
 
         setContent {
             val context = LocalContext.current
@@ -72,7 +63,7 @@ class MainActivity : ComponentActivity() {
             val gestures by viewModel.gestures.collectAsState()
 
             // Initialize correct state immediately to avoid flipping
-            var appState by remember { 
+            var appState by remember(fromLockService) { 
                 mutableStateOf(
                     when {
                         fromLockService && isLocked && imageUri != null && gestures.isNotEmpty() -> AppState.LOCKED
@@ -83,14 +74,19 @@ class MainActivity : ComponentActivity() {
             }
 
             // Track that user was locked when activity started
-            LaunchedEffect(Unit) {
-                wasLockedOnStart = isLocked
+            LaunchedEffect(fromLockService, isLocked) {
+                if (fromLockService) {
+                    wasLockedOnStart = isLocked
+                }
             }
 
             DisposableEffect(Lifecycle.Event.ON_RESUME) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         viewModel.updatePermissionStates(context)
+                        if (fromLockService && isLocked) {
+                            dismissKeyguard()
+                        }
                     }
                 }
                 lifecycle.addObserver(observer)
@@ -114,17 +110,18 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(isLocked) {
                 if (wasLockedOnStart && !isLocked) {
                     // Dismiss the native swipe-to-unlock keyguard
-                    val kmInner = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        kmInner.requestDismissKeyguard(context as ComponentActivity, null)
-                    }
+                    dismissKeyguard()
                     if (fromLockService) {
                         fromLockService = false
                         wasLockedOnStart = false
                         val act = context as? ComponentActivity
-                        act?.finishAndRemoveTask()
-                        @Suppress("DEPRECATION")
-                        act?.overridePendingTransition(0, 0)
+                        act?.let {
+                            @Suppress("DEPRECATION")
+                            it.overridePendingTransition(0, 0)
+                            it.finish()
+                            @Suppress("DEPRECATION")
+                            it.overridePendingTransition(0, 0)
+                        }
                     }
                 }
             }
@@ -145,16 +142,48 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             overridePendingTransition(0, 0)
             
-            // Re-dismiss keyguard on every new intent from service
-            val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                km.requestDismissKeyguard(this, null)
-            }
+            applyLockScreenFlags()
+            dismissKeyguard()
         }
+    }
+
+    private fun applyLockScreenFlags() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
+            )
         }
+    }
+
+    private fun dismissKeyguard() {
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            km.requestDismissKeyguard(this, null)
+        }
+        
+        // Legacy fallback for better compatibility on various manufacturers
+        @Suppress("DEPRECATION")
+        if (keyguardLock == null) {
+            keyguardLock = km.newKeyguardLock("TouchX:Lock")
+        }
+        keyguardLock?.disableKeyguard()
+        
+        @Suppress("DEPRECATION")
+        window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Removed reenableKeyguard() to prevent system lock from reappearing after successful unlock.
+        // The system will naturally restore the keyguard on the next screen-off event.
     }
 }
 
@@ -201,10 +230,14 @@ fun TouchXApp(
                         if (fromService) {
                             // Write directly to SharedPreferences WITHOUT updating ViewModel
                             // so Compose never recomposes to show the dashboard
+                            // Use commit() for synchronous write to ensure state is saved before finish
                             context.getSharedPreferences("picture_lock", Context.MODE_PRIVATE)
-                                .edit().putBoolean("is_locked", false).apply()
+                                .edit().putBoolean("is_locked", false).commit()
+                            
                             (context as? ComponentActivity)?.let { act ->
-                                act.finishAndRemoveTask()
+                                @Suppress("DEPRECATION")
+                                act.overridePendingTransition(0, 0)
+                                act.finish()
                                 @Suppress("DEPRECATION")
                                 act.overridePendingTransition(0, 0)
                             }

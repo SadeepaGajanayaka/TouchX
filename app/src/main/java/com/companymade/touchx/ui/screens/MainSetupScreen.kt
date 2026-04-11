@@ -331,7 +331,7 @@ fun InstructionsDialog(onClose: () -> Unit, onNext: () -> Unit) {
 fun UploadDialog(onClose: () -> Unit, onFinalNext: (Uri, GestureMode, Int) -> Unit) {
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var uploadError by remember { mutableStateOf<String?>(null) }
-    var gestureMode by remember { mutableStateOf(GestureMode.FREEHAND) }
+    var gestureMode by remember { mutableStateOf(GestureMode.LINE) }
     var gestureCount by remember { mutableIntStateOf(3) }
     
     val context = LocalContext.current
@@ -492,9 +492,9 @@ fun UploadDialog(onClose: () -> Unit, onFinalNext: (Uri, GestureMode, Int) -> Un
                                 onClick = { gestureMode = GestureMode.TAPS_ONLY }
                             )
                             GestureOptionChip(
-                                text = "Freehand", 
-                                selected = gestureMode == GestureMode.FREEHAND,
-                                onClick = { gestureMode = GestureMode.FREEHAND }
+                                text = "Line & Taps", 
+                                selected = gestureMode == GestureMode.LINE,
+                                onClick = { gestureMode = GestureMode.LINE }
                             )
                         }
                         

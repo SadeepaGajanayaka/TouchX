@@ -21,26 +21,35 @@ class LockService : Service() {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     sharedPref.edit().putBoolean("is_locked", true).apply()
-                }
-                Intent.ACTION_SCREEN_ON -> {
                     val isLocked = sharedPref.getBoolean("is_locked", false)
                     if (isLocked) {
-                        val lockIntent = Intent(context, MainActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or 
-                                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or 
-                                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                     Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                            putExtra("FROM_LOCK_SERVICE", true)
-                        }
-                        try {
-                            context.startActivity(lockIntent)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
+                        launchLockScreen(context)
+                    }
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    // Start on SCREEN_ON too as a backup for some aggressive manufacturers
+                    val isLocked = sharedPref.getBoolean("is_locked", false)
+                    if (isLocked) {
+                        launchLockScreen(context)
                         refreshNotification()
                     }
                 }
             }
+        }
+    }
+
+    private fun launchLockScreen(context: Context) {
+        val lockIntent = Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or 
+                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or 
+                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                     Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            putExtra("FROM_LOCK_SERVICE", true)
+        }
+        try {
+            context.startActivity(lockIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -50,7 +59,11 @@ class LockService : Service() {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
         }
-        registerReceiver(receiver, filter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
         startForegroundService()
     }
 

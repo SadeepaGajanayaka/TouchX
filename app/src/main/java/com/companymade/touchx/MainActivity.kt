@@ -204,6 +204,7 @@ fun TouchXApp(
     val gestureMode by viewModel.gestureMode.collectAsState()
     val targetGestureCount by viewModel.targetGestureCount.collectAsState()
     val tempSettingUri by viewModel.tempSettingUri.collectAsState()
+    val gestureColor by viewModel.gestureColor.collectAsState()
 
     TouchXTheme {
         AnimatedContent(
@@ -226,6 +227,7 @@ fun TouchXApp(
                 AppState.LOCKED -> PictureLockScreen(
                     imageUri = imageUri!!,
                     gestures = gestures,
+                    gestureColor = gestureColor,
                     onUnlock = { 
                         if (fromService) {
                             // Write directly to SharedPreferences WITHOUT updating ViewModel
@@ -250,6 +252,7 @@ fun TouchXApp(
                     imageUri = tempSettingUri!!,
                     gestureMode = gestureMode,
                     targetCount = targetGestureCount,
+                    gestureColor = gestureColor,
                     onPasswordSet = { uri, gest -> viewModel.savePassword(context, uri, gest) },
                     onCancel = { viewModel.cancelSettingPassword() }
                 )
@@ -263,6 +266,8 @@ fun TouchXApp(
                     },
                     onLock = { viewModel.setLock(true) },
                     onRemovePassword = { viewModel.clearPassword(context) },
+                    gestureColor = gestureColor,
+                    onColorChange = { viewModel.updateGestureColor(it) },
                     onRequestOverlay = { 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             val intent = Intent(

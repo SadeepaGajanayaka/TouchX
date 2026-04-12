@@ -14,6 +14,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -23,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -47,6 +49,8 @@ fun MainSetupScreen(
     onSetNewPassword: (Uri, GestureMode, Int) -> Unit,
     onLock: () -> Unit,
     onRemovePassword: () -> Unit,
+    gestureColor: Int,
+    onColorChange: (Int) -> Unit,
     onRequestOverlay: () -> Unit,
     onRequestBattery: () -> Unit,
     onRequestAutoStart: () -> Unit
@@ -55,12 +59,44 @@ fun MainSetupScreen(
     var showUploadDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var hasSmsPermission by remember { 
+        mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED) 
+    }
+    var hasCallPermission by remember { 
+        mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CALL_LOG) == android.content.pm.PackageManager.PERMISSION_GRANTED) 
+    }
+    var hasNotificationAccess by remember {
+        mutableStateOf(isNotificationServiceEnabled(context))
+    }
+
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted -> hasSmsPermission = isGranted }
+    
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted -> hasCallPermission = isGranted }
+
+    // Sync on resume (in case they changed permissions in settings)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasSmsPermission = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                hasCallPermission = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CALL_LOG) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                hasNotificationAccess = isNotificationServiceEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.Start
         ) {
+            // FIXED HEADER
             Spacer(modifier = Modifier.height(40.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -71,7 +107,7 @@ fun MainSetupScreen(
                     text = "Dashboard",
                     style = MaterialTheme.typography.displaySmall.copy(
                         fontWeight = FontWeight.Bold,
-                        fontSize = 36.sp
+                        fontSize = 32.sp
                     ),
                     color = Color.White
                 )
@@ -82,7 +118,7 @@ fun MainSetupScreen(
                             Icons.Default.MoreVert,
                             contentDescription = "More options",
                             tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                     
@@ -103,9 +139,16 @@ fun MainSetupScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // SCROLLABLE CENTER
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 DashboardCard(
                     icon = Icons.Default.Layers,
                     title = "Overlay Permission",
@@ -121,51 +164,156 @@ fun MainSetupScreen(
                     onToggle = onRequestBattery
                 )
                 DashboardCard(
+                    icon = Icons.Default.Textsms,
+                    title = "SMS Notifications",
+                    subtitle = "Show unread message count",
+                    isToggled = hasSmsPermission,
+                    onToggle = { 
+                        if (hasSmsPermission) {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                            }
+                            context.startActivity(intent)
+                        } else {
+                            smsPermissionLauncher.launch(android.Manifest.permission.READ_SMS)
+                        }
+                    }
+                )
+                DashboardCard(
+                    icon = Icons.Default.Call,
+                    title = "Call Notifications",
+                    subtitle = "Show missed call count",
+                    isToggled = hasCallPermission,
+                    onToggle = { 
+                        if (hasCallPermission) {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                            }
+                            context.startActivity(intent)
+                        } else {
+                            callPermissionLauncher.launch(android.Manifest.permission.READ_CALL_LOG)
+                        }
+                    }
+                )
+                DashboardCard(
+                    icon = Icons.Default.NotificationsActive,
+                    title = "General Notifications",
+                    subtitle = "Signs for WhatsApp, apps, etc.",
+                    isToggled = hasNotificationAccess,
+                    onToggle = { 
+                        context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                    }
+                )
+                DashboardCard(
                     icon = Icons.Default.RocketLaunch,
                     title = "Auto-Start",
                     subtitle = "Run on boot",
                     isToggled = false,
                     onToggle = onRequestAutoStart
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // GESTURE COLOR PICKER
+                Text("Touch Color", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(end = 24.dp)
+                ) {
+                    val palette = listOf(
+                        0xFF00E5FF.toInt(), // Cyan (Default)
+                        0xFFFFFFFF.toInt(), // White
+                        0xFFFF1744.toInt(), // Red
+                        0xFFF50057.toInt(), // Pink
+                        0xFFD500F9.toInt(), // Deep Purple
+                        0xFF651FFF.toInt(), // Indigo
+                        0xFF2979FF.toInt(), // Blue
+                        0xFF00B0FF.toInt(), // Light Blue
+                        0xFF00E676.toInt(), // Green
+                        0xFF76FF03.toInt(), // Light Green
+                        0xFFC6FF00.toInt(), // Lime
+                        0xFFFFEA00.toInt(), // Yellow
+                        0xFFFFC400.toInt(), // Amber
+                        0xFFFF9100.toInt(), // Orange
+                        0xFFFF3D00.toInt(), // Deep Orange
+                        0xFF3E2723.toInt(), // Brown
+                        0xFF37474F.toInt(), // Blue Grey
+                        0xFF212121.toInt(), // Blackish
+                        0xFF8BC34A.toInt(), // Olive
+                        0xFFFFB74D.toInt(), // Muted Orange
+                        0xFF9575CD.toInt(), // Muted Purple
+                        0xFF4DB6AC.toInt()  // Muted Teal
+                    )
+                    items(palette) { colorInt ->
+                        val color = Color(colorInt)
+                        val isSelected = colorInt.toInt() == gestureColor
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(color)
+                                .border(
+                                    width = 3.dp,
+                                    color = if (isSelected) Color.White else Color.Transparent,
+                                    shape = androidx.compose.foundation.shape.CircleShape
+                                )
+                                .clickable { onColorChange(colorInt.toInt()) }
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            // FIXED FOOTER
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = { showInstructions = true },
-                modifier = Modifier.fillMaxWidth().height(72.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().height(58.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF222222),
                     contentColor = Color.White
                 )
             ) {
-                Text(if (hasPassword) "Update Picture Password" else "Setup Picture Password", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                Text(
+                    text = if (hasPassword) "Update Picture Password" else "Setup Picture Password", 
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                )
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Button(
                 onClick = onLock,
                 enabled = hasPassword,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().height(58.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (hasPassword) Color.White else Color(0xFF1A1A1A),
                     contentColor = if (hasPassword) Color.Black else Color.Gray
                 )
             ) {
-                Text("Lock Now", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                Text("Lock Now", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp))
             }
 
             if (hasPassword) {
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
                     onClick = onRemovePassword,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                    modifier = Modifier.fillMaxWidth().height(58.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2A0000),
+                        contentColor = Color.Red.copy(alpha = 0.9f)
+                    ),
+                    border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.2f))
                 ) {
-                    Text("Remove Password", color = Color.Red.copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
+                    Text("Remove Password", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp))
                 }
+                Spacer(modifier = Modifier.height(24.dp))
             } else {
                 Spacer(modifier = Modifier.height(24.dp))
             }
@@ -253,28 +401,29 @@ fun DashboardCard(
     onToggle: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth().height(100.dp),
-        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().height(80.dp),
+        shape = RoundedCornerShape(18.dp),
         color = Color(0xFF111111)
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(28.dp)).background(Color.Black),
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
             }
-            Spacer(modifier = Modifier.width(20.dp))
+            Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                Text(subtitle, color = Color.Gray, fontSize = 14.sp)
+                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(subtitle, color = Color.Gray, fontSize = 12.sp)
             }
             Switch(
                 checked = isToggled,
                 onCheckedChange = { onToggle() },
+                modifier = Modifier.scale(0.85f),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = Color(0xFF333333),
@@ -290,40 +439,78 @@ fun DashboardCard(
 @Composable
 fun InstructionsDialog(onClose: () -> Unit, onNext: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
             Surface(
-                modifier = Modifier.fillMaxWidth(0.9f).height(600.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = Color(0xFFB0B0B0)
+                modifier = Modifier.fillMaxWidth(0.9f).heightIn(max = 640.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = Color(0xFF1A1A1A)
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Instructions", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), color = Color.Black)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Mastering TouchX",
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
                         IconButton(onClick = onClose) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Black)
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
                         }
                     }
+                    
                     Spacer(Modifier.height(16.dp))
-                    Box(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                        Text(
-                            text = "\"Welcome to TouchX, the next generation of professional security for your Android device. Unlike traditional PINs or patterns that can be easily shoulder-surfed, TouchX uses your own visual memory to create a secure, invisible gateway. A Picture Password is a unique combination of three gestures—either single taps or straight-line swipes—drawn specifically over features of an image that only you recognize. By choosing a personal photograph from your gallery, you transform a simple image into a sophisticated biometric-style authentication key that is nearly impossible for others to guess or replicate.\"",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.Black,
-                            lineHeight = 20.sp
-                        )
+                    
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        InstructionStep("1. The Power of Visual Memory", "Forget PINs. TouchX uses 'spatial memory.' You'll pick a photo and touch specific landmarks that only you know. It's invisible, secure, and incredibly fast.")
+                        InstructionStep("2. Choosing Your Landmarks", "Select an image with clear points (like eyes on a face or stars in a sky). You will set 3 or more gestures over these points.")
+                        InstructionStep("3. Tap or Swipe?", "• Tap: A single touch on a spot.\n• Swipe: Connect two points with a line. Swipes are harder for others to track!")
+                        InstructionStep("4. Manual Confirmation", "During setup, you MUST press 'Confirm' after each gesture. This ensures every touch is exactly where you want it.")
+                        InstructionStep("5. Learn the Rhythm", "After setting your gestures, watch the 'Verification Playback.' This shows your code one last time. Memorize the order and location perfectly.")
+                        InstructionStep("6. The Stealth Lock", "On your lock screen, no lines or dots will appear when you touch. Just tap your secret spots in order. The screen will stay clean to keep others guessing.")
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Surface(
+                            color = Color.White.copy(alpha = 0.05f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                "Tip: Always use a photo you are familiar with. A picture of your pet or a favorite travel spot works best!",
+                                modifier = Modifier.padding(12.dp),
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 12.sp
+                            )
+                        }
                     }
+                    
                     Spacer(Modifier.height(24.dp))
+                    
                     Button(
                         onClick = onNext,
-                        modifier = Modifier.fillMaxWidth().height(72.dp),
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
                         shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF222222), contentColor = Color.White)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
                     ) {
-                        Text("Next", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("I'm Ready", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun InstructionStep(title: String, desc: String) {
+    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+        Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(Modifier.height(4.dp))
+        Text(desc, color = Color.Gray, fontSize = 14.sp, lineHeight = 20.sp)
     }
 }
 
@@ -587,4 +774,10 @@ fun Modifier.drawDottedBorder() = this.drawWithContent {
         style = Stroke(width = 2.dp.toPx(), pathEffect = pathEffect),
         cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx())
     )
+}
+
+private fun isNotificationServiceEnabled(context: Context): Boolean {
+    val pkgName = context.packageName
+    val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+    return flat != null && flat.contains(pkgName)
 }

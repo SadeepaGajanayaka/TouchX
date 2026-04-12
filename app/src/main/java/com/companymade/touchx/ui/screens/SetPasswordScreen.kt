@@ -44,10 +44,12 @@ fun SetPasswordScreen(
     imageUri: Uri,
     gestureMode: GestureMode,
     targetCount: Int,
+    gestureColor: Int,
     onPasswordSet: (Uri, List<PasswordGesture>) -> Unit,
     onCancel: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val touchColor = Color(gestureColor)
     val bitmap = remember(imageUri) {
         try {
             context.contentResolver.openInputStream(imageUri)?.use { 
@@ -59,34 +61,6 @@ fun SetPasswordScreen(
     }
 
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
-
-    fun getAdaptiveColor(x: Float, y: Float): Color {
-        val b = bitmap ?: return Color(0xFF00E5FF)
-        val cw = containerSize.width.toFloat()
-        val ch = containerSize.height.toFloat()
-        val bw = b.width.toFloat()
-        val bh = b.height.toFloat()
-        if (cw <= 0 || ch <= 0 || bw <= 0 || bh <= 0) return Color.Black
-        
-        // ContentScale.Crop Math
-        val scale = maxOf(cw / bw, ch / bh)
-        val contentW = bw * scale
-        val contentH = bh * scale
-        val diffX = (contentW - cw) / 2f
-        val diffY = (contentH - ch) / 2f
-        
-        val bitmapPixelX = ((x * cw + diffX) / scale).toInt().coerceIn(0, b.width - 1)
-        val bitmapPixelY = ((y * ch + diffY) / scale).toInt().coerceIn(0, b.height - 1)
-        
-        val pixel = b.getPixel(bitmapPixelX, bitmapPixelY)
-        val r = android.graphics.Color.red(pixel)
-        val g = android.graphics.Color.green(pixel)
-        val bl = android.graphics.Color.blue(pixel)
-        val luminance = (0.299 * r + 0.587 * g + 0.114 * bl) / 255.0
-        
-        // "opposite way" fix: user said light -> black, dark -> white.
-        return if (luminance > 0.5) Color.Black else Color.White
-    }
 
     var gestures by remember { mutableStateOf(listOf<PasswordGesture>()) }
     
@@ -166,7 +140,6 @@ fun SetPasswordScreen(
             }
             
             toDraw.forEach { g ->
-                val adaptiveColor = getAdaptiveColor(g.xStart, g.yStart)
                 val start = Offset(g.xStart * size.width, g.yStart * size.height)
                 val end = Offset(g.xEnd * size.width, g.yEnd * size.height)
                 
@@ -178,31 +151,30 @@ fun SetPasswordScreen(
 
                 if (g.type == GestureType.TAP) {
                     val tapAlpha = if (isReviewing != -1) progress else 1f
-                    drawCircle(color = adaptiveColor.copy(alpha = 0.2f * tapAlpha), center = start, radius = 40f)
-                    drawCircle(color = adaptiveColor.copy(alpha = 0.4f * tapAlpha), center = start, radius = 28f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f))
-                    drawCircle(color = adaptiveColor.copy(alpha = tapAlpha), center = start, radius = 14f)
+                    drawCircle(color = touchColor.copy(alpha = 0.2f * tapAlpha), center = start, radius = 40f)
+                    drawCircle(color = touchColor.copy(alpha = 0.4f * tapAlpha), center = start, radius = 28f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f))
+                    drawCircle(color = touchColor.copy(alpha = tapAlpha), center = start, radius = 14f)
                 } else {
                     val energyBrush = androidx.compose.ui.graphics.Brush.linearGradient(
-                        colors = listOf(adaptiveColor, adaptiveColor.copy(alpha = 0.4f)),
+                        colors = listOf(touchColor, touchColor.copy(alpha = 0.4f)),
                         start = start, end = animatedEnd
                     )
-                    drawLine(color = adaptiveColor.copy(alpha = 0.15f), start = start, end = animatedEnd, strokeWidth = 30f, cap = StrokeCap.Round)
+                    drawLine(color = touchColor.copy(alpha = 0.15f), start = start, end = animatedEnd, strokeWidth = 30f, cap = StrokeCap.Round)
                     drawLine(brush = energyBrush, start = start, end = animatedEnd, strokeWidth = 12f, cap = StrokeCap.Round)
-                    drawLine(color = adaptiveColor.copy(alpha = 0.9f), start = start, end = animatedEnd, strokeWidth = 3f, cap = StrokeCap.Round)
+                    drawLine(color = touchColor.copy(alpha = 0.9f), start = start, end = animatedEnd, strokeWidth = 3f, cap = StrokeCap.Round)
                     
-                    drawCircle(adaptiveColor, radius = 8f, center = start)
-                    if (progress > 0.95f) drawCircle(adaptiveColor, radius = 8f, center = end)
+                    drawCircle(touchColor, radius = 8f, center = start)
+                    if (progress > 0.95f) drawCircle(touchColor, radius = 8f, center = end)
                 }
             }
             
             // Also draw current drag
             dragStart?.let { s ->
-                val adaptiveColor = getAdaptiveColor(s.x / size.width, s.y / size.height)
                 val e = dragCurrent ?: s
                 if (gestureMode == GestureMode.LINE) {
-                    drawLine(color = adaptiveColor.copy(alpha = 0.5f), start = s, end = e, strokeWidth = 8f, cap = StrokeCap.Round)
+                    drawLine(color = touchColor.copy(alpha = 0.5f), start = s, end = e, strokeWidth = 8f, cap = StrokeCap.Round)
                 }
-                drawCircle(color = adaptiveColor.copy(alpha = 0.5f), center = s, radius = 20f)
+                drawCircle(color = touchColor.copy(alpha = 0.5f), center = s, radius = 20f)
             }
         }
 

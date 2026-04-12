@@ -1,5 +1,7 @@
 package com.companymade.touchx
 
+import android.app.Activity
+import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
@@ -24,12 +26,14 @@ import com.companymade.touchx.viewmodel.PictureLockViewModel
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: PictureLockViewModel
-    private var fromLockService = false
-    private var wasLockedOnStart = false
+    private var fromLockService by mutableStateOf(false)
+    private var wasLockedOnStart by mutableStateOf(false)
+    private var isUnlocking = false
     private var keyguardLock: KeyguardManager.KeyguardLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        viewModel = PictureLockViewModel(applicationContext)
         fromLockService = intent?.getBooleanExtra("FROM_LOCK_SERVICE", false) == true
         
         // Suppress app opening animation when triggered from service
@@ -51,10 +55,18 @@ class MainActivity : ComponentActivity() {
 
         // Dismiss the native swipe-to-unlock immediately
         dismissKeyguard()
+        
+        // Hide system bars completely and make them transparent
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
 
         setContent {
             val context = LocalContext.current
-            viewModel = remember { PictureLockViewModel(context) }
+            // Use the activity-level viewModel
             
             val isLocked by viewModel.isLocked.collectAsState()
             val hasOverlay by viewModel.hasOverlayPermission.collectAsState()
@@ -62,15 +74,23 @@ class MainActivity : ComponentActivity() {
             val imageUri by viewModel.imageUri.collectAsState()
             val gestures by viewModel.gestures.collectAsState()
 
-            // Initialize correct state immediately to avoid flipping
-            var appState by remember(fromLockService) { 
-                mutableStateOf(
-                    when {
-                        fromLockService && isLocked && imageUri != null && gestures.isNotEmpty() -> AppState.LOCKED
-                        fromLockService -> AppState.SETUP
-                        else -> AppState.SPLASH
-                    }
-                )
+            // Auto-hide system UI whenever we are in LOCKED state
+            LaunchedEffect(isLocked) {
+                if (isLocked) {
+                    hideSystemUI()
+                }
+            }
+
+            // Track actual current state based on service vs app usage
+            var appState by remember { mutableStateOf(AppState.SPLASH) }
+            
+            // Re-sync appState when fromLockService or isLocked changes
+            LaunchedEffect(fromLockService, isLocked) {
+                if (fromLockService && isLocked) {
+                    appState = AppState.LOCKED
+                } else if (appState == AppState.SPLASH && !fromLockService) {
+                    // Normal start
+                }
             }
 
             // Track that user was locked when activity started
@@ -84,8 +104,9 @@ class MainActivity : ComponentActivity() {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         viewModel.updatePermissionStates(context)
-                        if (fromLockService && isLocked) {
+                        if ((fromLockService || viewModel.isLocked.value)) {
                             dismissKeyguard()
+                            hideSystemUI()
                         }
                     }
                 }
@@ -106,31 +127,36 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // When user successfully unlocks, dismiss keyguard and finish if from service
-            LaunchedEffect(isLocked) {
-                if (wasLockedOnStart && !isLocked) {
-                    // Dismiss the native swipe-to-unlock keyguard
-                    dismissKeyguard()
-                    if (fromLockService) {
-                        fromLockService = false
-                        wasLockedOnStart = false
-                        val act = context as? ComponentActivity
-                        act?.let {
-                            @Suppress("DEPRECATION")
-                            it.overridePendingTransition(0, 0)
-                            it.finish()
-                            @Suppress("DEPRECATION")
-                            it.overridePendingTransition(0, 0)
-                        }
-                    }
-                }
-            }
+            // The final unlock logic is now handled inside TouchXApp's onUnlock callback
+            // for more precise control over transition vs finish.
 
             BackHandler(enabled = isLocked) {
                 // Consume back press when locked
             }
             
-            TouchXApp(viewModel, fromLockService, appState)
+            TouchXApp(
+                viewModel = viewModel,
+                fromService = fromLockService,
+                initialState = appState,
+                onDismissKeyguard = { dismissKeyguard() },
+                onUnlockStarted = { isUnlocking = true }
+            )
+            
+            // Dynamically manage Recent Apps visibility based on service usage
+            LaunchedEffect(fromLockService) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    val currentTaskId = (context as Activity).taskId
+                    am.appTasks.forEach { task ->
+                        val info = task.taskInfo
+                        @Suppress("DEPRECATION")
+                        val id = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.taskId else info.id
+                        if (id == currentTaskId) {
+                            task.setExcludeFromRecents(fromLockService)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -190,7 +216,7 @@ class MainActivity : ComponentActivity() {
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: android.content.res.Configuration) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
         // ABSOLUTE BLOCK: If the device tries to force split screen, snap back to full screen
-        if (isInMultiWindowMode && fromLockService && wasLockedOnStart) {
+        if (isInMultiWindowMode && (fromLockService || viewModel.isLocked.value)) {
             val intent = Intent(this, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 putExtra("FROM_LOCK_SERVICE", true)
@@ -199,14 +225,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Aggressive snap-back: If user tries to swipe up for Recent Apps or Home,
+        // we immediately bring the activity back to focus if the screen is still locked.
+        // We SKIP this if we are currently in the process of a valid UNLOCK.
+        if (!isUnlocking && (fromLockService || viewModel.isLocked.value)) {
+            if (viewModel.isLocked.value) {
+                val restartIntent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    putExtra("FROM_LOCK_SERVICE", true)
+                }
+                startActivity(restartIntent)
+            }
+        }
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         // Specifically for Home button / Home gesture
-        if (fromLockService && wasLockedOnStart) {
+        if (fromLockService || viewModel.isLocked.value) {
             val isStillLocked = viewModel.isLocked.value
             if (isStillLocked) {
                 val restartIntent = Intent(this, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NO_ANIMATION)
                     putExtra("FROM_LOCK_SERVICE", true)
                 }
                 startActivity(restartIntent)
@@ -216,7 +258,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (fromLockService && wasLockedOnStart && hasFocus) {
+        if (hasFocus && (fromLockService || viewModel.isLocked.value)) {
             hideSystemUI()
         }
     }
@@ -251,7 +293,9 @@ class MainActivity : ComponentActivity() {
 fun TouchXApp(
     viewModel: PictureLockViewModel, 
     fromService: Boolean = false,
-    initialState: AppState = AppState.SPLASH
+    initialState: AppState = AppState.SPLASH,
+    onDismissKeyguard: () -> Unit,
+    onUnlockStarted: () -> Unit
 ) {
     var appState by remember(initialState) { mutableStateOf(initialState) }
     val context = LocalContext.current
@@ -270,6 +314,10 @@ fun TouchXApp(
     TouchXTheme {
         AnimatedContent(
             targetState = when {
+                // If started from service, we EXCLUSIVELY stay in LOCKED mode.
+                // We never allow it to transition to SETUP in this instance.
+                fromService -> AppState.LOCKED
+                
                 appState == AppState.SPLASH -> AppState.SPLASH
                 isLocked && imageUri != null && gestures.isNotEmpty() -> AppState.LOCKED
                 isSettingPassword -> AppState.SET_PASSWORD
@@ -291,13 +339,17 @@ fun TouchXApp(
                     gestureColor = gestureColor,
                     clockStyle = clockStyle,
                     onUnlock = { 
-                        if (fromService) {
-                            // Write directly to SharedPreferences WITHOUT updating ViewModel
-                            // so Compose never recomposes to show the dashboard
-                            // Use commit() for synchronous write to ensure state is saved before finish
-                            context.getSharedPreferences("picture_lock", Context.MODE_PRIVATE)
-                                .edit().putBoolean("is_locked", false).commit()
+                        onUnlockStarted()
+                        // Synchronously save the unlock state to disk immediately
+                        context.getSharedPreferences("picture_lock", Context.MODE_PRIVATE)
+                            .edit().putBoolean("is_locked", false).commit()
                             
+                        // Also update ViewModel state so other components (like onPause) know we are unlocked
+                        viewModel.setLock(false)
+                            
+                        if (fromService) {
+                            // If we came from the lock service, just finish the activity after dismissing keyguard
+                            onDismissKeyguard()
                             (context as? ComponentActivity)?.let { act ->
                                 @Suppress("DEPRECATION")
                                 act.overridePendingTransition(0, 0)
@@ -305,8 +357,6 @@ fun TouchXApp(
                                 @Suppress("DEPRECATION")
                                 act.overridePendingTransition(0, 0)
                             }
-                        } else {
-                            viewModel.setLock(false)
                         }
                     }
                 )

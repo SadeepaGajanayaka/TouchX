@@ -43,7 +43,8 @@ class LockService : Service() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or 
                      Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or 
                      Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                     Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                     Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                     Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
             putExtra("FROM_LOCK_SERVICE", true)
         }
         try {

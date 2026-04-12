@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class GestureType { TAP, LINE }
 enum class GestureMode { TAPS_ONLY, LINE }
+enum class ClockStyle { CLASSIC, MODERN, MINIMAL, ELEGANT }
 
 data class PasswordGesture(
     val type: GestureType,
@@ -48,6 +49,14 @@ class PictureLockViewModel(context: Context) : ViewModel() {
 
     private val _gestures = MutableStateFlow<List<PasswordGesture>>(loadGestures())
     val gestures: StateFlow<List<PasswordGesture>> = _gestures.asStateFlow()
+
+    private val _clockStyle = MutableStateFlow(
+        run {
+            val saved = sharedPref.getString("clock_style", ClockStyle.CLASSIC.name)
+            try { ClockStyle.valueOf(saved!!) } catch (e: Exception) { ClockStyle.CLASSIC }
+        }
+    )
+    val clockStyle: StateFlow<ClockStyle> = _clockStyle.asStateFlow()
 
     private val _isLocked = MutableStateFlow(sharedPref.getBoolean("is_locked", false))
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
@@ -108,6 +117,11 @@ class PictureLockViewModel(context: Context) : ViewModel() {
     fun updateGestureColor(color: Int) {
         _gestureColor.value = color
         sharedPref.edit().putInt("touch_color", color).apply()
+    }
+
+    fun updateClockStyle(style: ClockStyle) {
+        _clockStyle.value = style
+        sharedPref.edit().putString("clock_style", style.name).apply()
     }
 
     fun startSettingPassword(uri: Uri) {

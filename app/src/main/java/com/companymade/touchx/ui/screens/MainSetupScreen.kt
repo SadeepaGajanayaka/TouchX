@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -40,6 +41,7 @@ import androidx.core.content.FileProvider
 import coil.compose.rememberAsyncImagePainter
 import java.io.File
 import com.companymade.touchx.viewmodel.GestureMode
+import com.companymade.touchx.viewmodel.ClockStyle
 
 @Composable
 fun MainSetupScreen(
@@ -51,6 +53,8 @@ fun MainSetupScreen(
     onRemovePassword: () -> Unit,
     gestureColor: Int,
     onColorChange: (Int) -> Unit,
+    clockStyle: ClockStyle,
+    onClockStyleChange: (ClockStyle) -> Unit,
     onRequestOverlay: () -> Unit,
     onRequestBattery: () -> Unit,
     onRequestAutoStart: () -> Unit
@@ -264,6 +268,28 @@ fun MainSetupScreen(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // CLOCK THEME SELECTOR
+                Text("Clock Theme", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(end = 24.dp)
+                ) {
+                    val styles = ClockStyle.values()
+                    items(styles) { style ->
+                        val isSelected = style == clockStyle
+                        ClockStylePreviewCard(
+                            style = style,
+                            isSelected = isSelected,
+                            onClick = { onClockStyleChange(style) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(30.dp))
             }
 
             // FIXED FOOTER
@@ -774,6 +800,107 @@ fun Modifier.drawDottedBorder() = this.drawWithContent {
         style = Stroke(width = 2.dp.toPx(), pathEffect = pathEffect),
         cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx())
     )
+}
+
+@Composable
+fun ClockStylePreviewCard(
+    style: ClockStyle,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val borderColor = if (isSelected) Color.White else Color.White.copy(alpha = 0.15f)
+    
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // MINI PHONE FRAME REPLICA
+        Box(
+            modifier = Modifier
+                .width(100.dp)
+                .height(160.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White.copy(alpha = 0.05f))
+                .border(2.dp, borderColor, RoundedCornerShape(16.dp))
+                .padding(2.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(Color(0xFF2C3E50), Color(0xFF000000))
+                        )
+                    )
+            ) {
+                // CLOCK CONTENT BASED ON STYLE
+                when (style) {
+                    ClockStyle.CLASSIC -> {
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("12:45", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("MON, 12 OCT", fontSize = 6.sp, color = Color.White.copy(alpha = 0.6f))
+                            Spacer(Modifier.height(4.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Box(Modifier.size(4.dp).background(Color.White.copy(alpha = 0.4f), CircleShape))
+                                Box(Modifier.size(4.dp).background(Color.White.copy(alpha = 0.4f), CircleShape))
+                            }
+                        }
+                    }
+                    ClockStyle.MODERN -> {
+                        Row(
+                            modifier = Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("12", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color.White, lineHeight = 16.sp)
+                                Text("45", fontSize = 18.sp, fontWeight = FontWeight.ExtraLight, color = Color.White, lineHeight = 16.sp)
+                            }
+                            Box(Modifier.padding(horizontal = 4.dp).width(0.5.dp).height(24.dp).background(Color.White.copy(alpha = 0.3f)))
+                            Column {
+                                Text("MON", fontSize = 5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Box(Modifier.padding(top = 2.dp).size(4.dp).background(Color.White.copy(alpha = 0.4f), CircleShape))
+                            }
+                        }
+                    }
+                    ClockStyle.MINIMAL -> {
+                        Column(
+                            modifier = Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 12.dp)
+                        ) {
+                            Text("12:45", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("Monday", fontSize = 6.sp, color = Color.White.copy(alpha = 0.5f))
+                            Spacer(Modifier.height(4.dp))
+                            Box(Modifier.size(4.dp).background(Color.White.copy(alpha = 0.4f), CircleShape))
+                        }
+                    }
+                    ClockStyle.ELEGANT -> {
+                        Column(
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("12:45", fontSize = 20.sp, fontWeight = FontWeight.W100, color = Color.White, letterSpacing = 1.sp)
+                            Text("OCTOBER 12", fontSize = 5.sp, color = Color.White.copy(alpha = 0.7f), letterSpacing = 1.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Box(Modifier.size(4.dp).background(Color.White.copy(alpha = 0.4f), CircleShape))
+                        }
+                    }
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = style.name.lowercase().replaceFirstChar { it.uppercase() },
+            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+        )
+    }
 }
 
 private fun isNotificationServiceEnabled(context: Context): Boolean {

@@ -31,7 +31,10 @@
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
             android:showOnLockScreen="true"
-            android:turnScreenOn="true"
+            android:turnScreenOn="false"
+            android:resizeableActivity="false"
+            android:supportsPictureInPicture="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
             android:theme="@style/Theme.TouchX.NoAnimation">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

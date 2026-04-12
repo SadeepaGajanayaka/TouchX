@@ -134,6 +134,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (fromLockService) {
+            applyLockScreenFlags()
+        }
+        // Recover from system notification unbind errors
+        NotificationService.triggerRebind(this)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         fromLockService = intent.getBooleanExtra("FROM_LOCK_SERVICE", false)
@@ -150,14 +159,12 @@ class MainActivity : ComponentActivity() {
     private fun applyLockScreenFlags() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
-            setTurnScreenOn(true)
+            setTurnScreenOn(false)
         } else {
             @Suppress("DEPRECATION")
             window.addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
             )
         }
@@ -178,6 +185,59 @@ class MainActivity : ComponentActivity() {
         
         @Suppress("DEPRECATION")
         window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+    }
+
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        // ABSOLUTE BLOCK: If the device tries to force split screen, snap back to full screen
+        if (isInMultiWindowMode && fromLockService && wasLockedOnStart) {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                putExtra("FROM_LOCK_SERVICE", true)
+            }
+            startActivity(intent)
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Specifically for Home button / Home gesture
+        if (fromLockService && wasLockedOnStart) {
+            val isStillLocked = viewModel.isLocked.value
+            if (isStillLocked) {
+                val restartIntent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    putExtra("FROM_LOCK_SERVICE", true)
+                }
+                startActivity(restartIntent)
+            }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (fromLockService && wasLockedOnStart && hasFocus) {
+            hideSystemUI()
+        }
+    }
+
+    private fun hideSystemUI() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            val controller = window.insetsController
+            if (controller != null) {
+                controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN)
+        }
     }
 
     override fun onDestroy() {
@@ -205,6 +265,7 @@ fun TouchXApp(
     val targetGestureCount by viewModel.targetGestureCount.collectAsState()
     val tempSettingUri by viewModel.tempSettingUri.collectAsState()
     val gestureColor by viewModel.gestureColor.collectAsState()
+    val clockStyle by viewModel.clockStyle.collectAsState()
 
     TouchXTheme {
         AnimatedContent(
@@ -228,6 +289,7 @@ fun TouchXApp(
                     imageUri = imageUri!!,
                     gestures = gestures,
                     gestureColor = gestureColor,
+                    clockStyle = clockStyle,
                     onUnlock = { 
                         if (fromService) {
                             // Write directly to SharedPreferences WITHOUT updating ViewModel
@@ -268,6 +330,8 @@ fun TouchXApp(
                     onRemovePassword = { viewModel.clearPassword(context) },
                     gestureColor = gestureColor,
                     onColorChange = { viewModel.updateGestureColor(it) },
+                    clockStyle = clockStyle,
+                    onClockStyleChange = { viewModel.updateClockStyle(it) },
                     onRequestOverlay = { 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             val intent = Intent(

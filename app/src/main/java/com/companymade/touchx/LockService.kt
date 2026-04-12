@@ -73,7 +73,7 @@ class LockService : Service() {
             val channel = NotificationChannel(
                 channelId,
                 "TouchX Protection",
-                NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -95,9 +95,8 @@ class LockService : Service() {
             .setContentTitle("TouchX Secure")
             .setContentText("Lock screen protection is active")
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
+            .setPriority(NotificationCompat.PRIORITY_LOW) // CRITICAL: High priority wakes the screen
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
 

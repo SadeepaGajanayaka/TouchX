@@ -5,11 +5,6 @@ import android.service.notification.StatusBarNotification
 
 class NotificationService : NotificationListenerService() {
 
-    companion object {
-        var isNotificationActive = false
-            private set
-    }
-
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         updateNotificationState()
     }
@@ -19,7 +14,24 @@ class NotificationService : NotificationListenerService() {
     }
 
     override fun onListenerConnected() {
+        super.onListenerConnected()
         updateNotificationState()
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        isNotificationActive = false
+    }
+
+    companion object {
+        var isNotificationActive = false
+            private set
+
+        fun triggerRebind(context: android.content.Context) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                requestRebind(android.content.ComponentName(context, NotificationService::class.java))
+            }
+        }
     }
 
     private fun updateNotificationState() {

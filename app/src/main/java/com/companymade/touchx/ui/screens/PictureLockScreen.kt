@@ -41,6 +41,7 @@ import coil.compose.AsyncImage
 import com.companymade.touchx.ui.components.PulseFeedback
 import com.companymade.touchx.viewmodel.GestureType
 import com.companymade.touchx.viewmodel.PasswordGesture
+import com.companymade.touchx.viewmodel.ClockStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -53,6 +54,7 @@ fun PictureLockScreen(
     imageUri: Uri,
     gestures: List<PasswordGesture>,
     gestureColor: Int,
+    clockStyle: ClockStyle,
     onUnlock: () -> Unit
 ) {
     if (gestures.isEmpty()) {
@@ -79,8 +81,12 @@ fun PictureLockScreen(
         finishedListener = { alphaValue -> if (alphaValue == 0f) onUnlock() }
     )
     
-    var timeText by remember { mutableStateOf("") }
-    var dateText by remember { mutableStateOf("") }
+    val initialNow = java.util.Calendar.getInstance().time
+    val timeFormatRef = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+    val dateFormatRef = remember { java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()) }
+
+    var timeText by remember { mutableStateOf(timeFormatRef.format(initialNow)) }
+    var dateText by remember { mutableStateOf(dateFormatRef.format(initialNow)) }
     
     var unreadSmsCount by remember { mutableIntStateOf(0) }
     var missedCallCount by remember { mutableIntStateOf(0) }
@@ -90,12 +96,10 @@ fun PictureLockScreen(
     val touchColor = Color(gestureColor)
 
     LaunchedEffect(Unit) {
-        val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-        val dateFormat = java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault())
         while(true) {
             val now = java.util.Calendar.getInstance().time
-            timeText = timeFormat.format(now)
-            dateText = dateFormat.format(now)
+            timeText = timeFormatRef.format(now)
+            dateText = dateFormatRef.format(now)
             
             // REFRESH COUNTS
             try {
@@ -283,94 +287,63 @@ fun PictureLockScreen(
             }
         }
 
-        // 1. PREMIUM CLOCK & DATE WIDGET (ADAPTIVE GLASSMORPHISM)
+        // 1. THEMED CLOCK & DATE WIDGET
         val widgetColor = getAdaptiveColor(0.5f, 0.15f)
         val isLightTheme = widgetColor == Color.Black
-        
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 100.dp)
-                .clip(RoundedCornerShape(32.dp))
-                .background(if (isLightTheme) Color.Black.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.08f))
-                .border(
-                    0.5.dp, 
-                    if (isLightTheme) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.15f), 
-                    RoundedCornerShape(32.dp)
-                )
-                .padding(horizontal = 48.dp, vertical = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = timeText,
-                style = MaterialTheme.typography.displayLarge.copy(
-                    fontWeight = FontWeight.ExtraLight,
-                    fontSize = 80.sp,
-                    letterSpacing = (-2).sp
-                ),
-                color = widgetColor
-            )
-            Text(
-                text = dateText,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.2.sp
-                ),
-                color = widgetColor.copy(alpha = 0.7f)
-            )
-            
-            Spacer(modifier = Modifier.height(20.dp))
-            
-            // Dynamic Notification Icons
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Phone / Missed Calls
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Phone,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = widgetColor.copy(alpha = if (missedCallCount > 0) 1f else 0.35f)
-                    )
-                    if (missedCallCount > 0) {
-                        Text(
-                            text = " $missedCallCount",
-                            color = widgetColor,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
-                    }
-                }
-                
-                // Mail / Unread SMS
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Mail,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = widgetColor.copy(alpha = if (unreadSmsCount > 0) 1f else 0.35f)
-                    )
-                    if (unreadSmsCount > 0) {
-                        Text(
-                            text = " $unreadSmsCount",
-                            color = widgetColor,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
-                    }
-                }
 
-                // General Notifications
-                Icon(
-                    Icons.Default.Notifications,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = widgetColor.copy(alpha = if (hasGeneralNotifications) 1f else 0.35f)
-                )
+        when (clockStyle) {
+            ClockStyle.CLASSIC -> {
+                Column(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 100.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(timeText, style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.ExtraLight, fontSize = 80.sp), color = widgetColor)
+                    Text(dateText, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = widgetColor.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(24.dp))
+                    NotificationRow(missedCallCount, unreadSmsCount, hasGeneralNotifications, widgetColor)
+                }
+            }
+            ClockStyle.MODERN -> {
+                val timeParts = timeText.split(":")
+                val hours = timeParts.getOrNull(0) ?: "--"
+                val minutes = timeParts.getOrNull(1) ?: "--"
+                
+                Row(
+                    modifier = Modifier.align(Alignment.TopStart).padding(start = 32.dp, top = 80.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(hours, style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black, fontSize = 90.sp, lineHeight = 80.sp), color = widgetColor)
+                        Text(minutes, style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Light, fontSize = 90.sp, lineHeight = 80.sp), color = widgetColor)
+                    }
+                    Box(modifier = Modifier.padding(start = 16.dp).width(1.dp).height(120.dp).background(widgetColor.copy(alpha = 0.2f)))
+                    Column(modifier = Modifier.padding(start = 16.dp)) {
+                        Text(dateText.uppercase(), style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp), color = widgetColor)
+                        Spacer(Modifier.height(12.dp))
+                        NotificationRow(missedCallCount, unreadSmsCount, hasGeneralNotifications, widgetColor)
+                    }
+                }
+            }
+            ClockStyle.MINIMAL -> {
+                Column(
+                    modifier = Modifier.align(Alignment.BottomStart).padding(start = 32.dp, bottom = 60.dp)
+                ) {
+                    Text(timeText, style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold, fontSize = 42.sp), color = widgetColor)
+                    Text(dateText, style = MaterialTheme.typography.bodyMedium, color = widgetColor.copy(alpha = 0.6f))
+                    Spacer(Modifier.height(12.dp))
+                    NotificationRow(missedCallCount, unreadSmsCount, hasGeneralNotifications, widgetColor)
+                }
+            }
+            ClockStyle.ELEGANT -> {
+                Column(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 120.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(timeText, style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.W100, fontSize = 100.sp, letterSpacing = 8.sp), color = widgetColor)
+                    Text(dateText.uppercase(), style = MaterialTheme.typography.bodySmall.copy(letterSpacing = 4.sp, fontWeight = FontWeight.Light), color = widgetColor)
+                    Spacer(Modifier.height(32.dp))
+                    NotificationRow(missedCallCount, unreadSmsCount, hasGeneralNotifications, widgetColor)
+                }
             }
         }
 
@@ -395,5 +368,64 @@ fun PictureLockScreen(
                 Box(modifier = Modifier.width(40.dp).height(1.dp).background(Color.Red.copy(alpha = 0.4f)))
             }
         }
+    }
+}
+
+@Composable
+fun NotificationRow(
+    missedCallCount: Int,
+    unreadSmsCount: Int,
+    hasGeneralNotifications: Boolean,
+    widgetColor: Color
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Phone / Missed Calls
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Phone,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = widgetColor.copy(alpha = if (missedCallCount > 0) 1f else 0.35f)
+            )
+            if (missedCallCount > 0) {
+                Text(
+                    text = " $missedCallCount",
+                    color = widgetColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+        
+        // Mail / Unread SMS
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Mail,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = widgetColor.copy(alpha = if (unreadSmsCount > 0) 1f else 0.35f)
+            )
+            if (unreadSmsCount > 0) {
+                Text(
+                    text = " $unreadSmsCount",
+                    color = widgetColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+
+        // General Notifications
+        Icon(
+            Icons.Default.Notifications,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = widgetColor.copy(alpha = if (hasGeneralNotifications) 1f else 0.35f)
+        )
     }
 }

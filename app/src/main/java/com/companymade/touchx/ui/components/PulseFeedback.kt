@@ -37,7 +37,7 @@ fun PulseFeedback(
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         val center = Offset(x, y)
-        val pulseColor = if (color == Color.Red) Color.Red else Color(0xFF00E5FF)
+        val pulseColor = color
         val currentAlpha = alphaAnim.value
         val currentSize = sizeAnim.value
         

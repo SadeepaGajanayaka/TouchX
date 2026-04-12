@@ -52,6 +52,7 @@ data class TrailPoint(val offset: Offset, val timestamp: Long)
 fun PictureLockScreen(
     imageUri: Uri,
     gestures: List<PasswordGesture>,
+    gestureColor: Int,
     onUnlock: () -> Unit
 ) {
     if (gestures.isEmpty()) {
@@ -81,6 +82,13 @@ fun PictureLockScreen(
     var timeText by remember { mutableStateOf("") }
     var dateText by remember { mutableStateOf("") }
     
+    var unreadSmsCount by remember { mutableIntStateOf(0) }
+    var missedCallCount by remember { mutableIntStateOf(0) }
+    var hasGeneralNotifications by remember { mutableStateOf(false) }
+    
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val touchColor = Color(gestureColor)
+
     LaunchedEffect(Unit) {
         val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
         val dateFormat = java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault())
@@ -88,12 +96,34 @@ fun PictureLockScreen(
             val now = java.util.Calendar.getInstance().time
             timeText = timeFormat.format(now)
             dateText = dateFormat.format(now)
+            
+            // REFRESH COUNTS
+            try {
+                val smsCursor = context.contentResolver.query(
+                    android.net.Uri.parse("content://sms/inbox"),
+                    arrayOf("_id"), "read = 0", null, null
+                )
+                unreadSmsCount = smsCursor?.count ?: 0
+                smsCursor?.close()
+                
+                val callCursor = context.contentResolver.query(
+                    android.provider.CallLog.Calls.CONTENT_URI,
+                    arrayOf(android.provider.CallLog.Calls._ID),
+                    "${android.provider.CallLog.Calls.TYPE} = ${android.provider.CallLog.Calls.MISSED_TYPE} AND ${android.provider.CallLog.Calls.IS_READ} = 0",
+                    null, null
+                )
+                missedCallCount = callCursor?.count ?: 0
+                callCursor?.close()
+                
+                // CHECK GENERAL NOTIFICATIONS
+                hasGeneralNotifications = com.companymade.touchx.NotificationService.isNotificationActive
+            } catch (e: Exception) { e.printStackTrace() }
+            
             delay(10000) // Update every 10 seconds
         }
     }
     
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
     
     val trailPoints = remember { mutableStateListOf<TrailPoint>() }
     
@@ -158,9 +188,15 @@ fun PictureLockScreen(
                     awaitPointerEventScope {
                         while (true) {
                             val down = awaitFirstDown()
+                            tapPos = down.position.x to down.position.y
+                            showPulse = true
+                            isCorrectGesture = true // Default to true while holding, validation happens on release
+                            
                             dragStart = down.position
                             dragCurrent = down.position
                             isError = false
+                            
+                            trailPoints.add(TrailPoint(down.position, System.currentTimeMillis()))
                             
                             while (true) {
                                 val event = awaitPointerEvent()
@@ -190,8 +226,7 @@ fun PictureLockScreen(
                                         endXOk && endYOk && inputType == GestureType.LINE
                                     }
                                     
-                                    tapPos = s.x to s.y
-                                    showPulse = true
+                                    // Validation happens here. If false, we'll show an error pulse next time or feedback
                                     
                                     if (startXOk && startYOk && endOk) {
                                         isCorrectGesture = true
@@ -226,17 +261,14 @@ fun PictureLockScreen(
                 }
         )
         
-        // STEALTH MODE: Drawing feedback is now handled only by PulseFeedback and the Dynamic Trail.
-        // The persistent line drawing Canvas has been removed for security.
         Canvas(modifier = Modifier.fillMaxSize()) {
             val now = System.currentTimeMillis()
             trailPoints.forEach { pt ->
                 val age = now - pt.timestamp
                 val alpha = (1.0f - age / 300f).coerceIn(0f, 1f)
-                val color = getAdaptiveColor(pt.offset.x / size.width, pt.offset.y / size.height)
                 
                 drawCircle(
-                    color = color.copy(alpha = alpha * 0.4f),
+                    color = touchColor.copy(alpha = alpha * 0.4f),
                     radius = 12f,
                     center = pt.offset
                 )
@@ -245,8 +277,7 @@ fun PictureLockScreen(
 
         tapPos?.let { (x, y) ->
             if (showPulse) {
-                val adaptiveTapColor = getAdaptiveColor(x / containerSize.width, y / containerSize.height)
-                PulseFeedback(x = x, y = y, color = if (isCorrectGesture) adaptiveTapColor else Color.Red) {
+                PulseFeedback(x = x, y = y, color = if (isCorrectGesture) touchColor else Color.Red) {
                     showPulse = false
                 }
             }
@@ -290,28 +321,55 @@ fun PictureLockScreen(
             
             Spacer(modifier = Modifier.height(20.dp))
             
-            // Subtle Notification Icons
+            // Dynamic Notification Icons
             Row(
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.Phone,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = widgetColor.copy(alpha = 0.35f)
-                )
-                Icon(
-                    Icons.Default.Mail,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = widgetColor.copy(alpha = 0.35f)
-                )
+                // Phone / Missed Calls
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Phone,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = widgetColor.copy(alpha = if (missedCallCount > 0) 1f else 0.35f)
+                    )
+                    if (missedCallCount > 0) {
+                        Text(
+                            text = " $missedCallCount",
+                            color = widgetColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+                    }
+                }
+                
+                // Mail / Unread SMS
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Mail,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = widgetColor.copy(alpha = if (unreadSmsCount > 0) 1f else 0.35f)
+                    )
+                    if (unreadSmsCount > 0) {
+                        Text(
+                            text = " $unreadSmsCount",
+                            color = widgetColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+                    }
+                }
+
+                // General Notifications
                 Icon(
                     Icons.Default.Notifications,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = widgetColor.copy(alpha = 0.35f)
+                    modifier = Modifier.size(18.dp),
+                    tint = widgetColor.copy(alpha = if (hasGeneralNotifications) 1f else 0.35f)
                 )
             }
         }

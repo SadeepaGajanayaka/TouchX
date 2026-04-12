@@ -41,6 +41,11 @@ class PictureLockViewModel(context: Context) : ViewModel() {
     )
     val targetGestureCount: StateFlow<Int> = _targetGestureCount.asStateFlow()
 
+    private val _gestureColor = MutableStateFlow(
+        sharedPref.getInt("touch_color", 0xFF00E5FF.toInt())
+    )
+    val gestureColor: StateFlow<Int> = _gestureColor.asStateFlow()
+
     private val _gestures = MutableStateFlow<List<PasswordGesture>>(loadGestures())
     val gestures: StateFlow<List<PasswordGesture>> = _gestures.asStateFlow()
 
@@ -98,6 +103,11 @@ class PictureLockViewModel(context: Context) : ViewModel() {
             .putString("gesture_mode", mode.name)
             .putInt("target_gesture_count", count)
             .apply()
+    }
+
+    fun updateGestureColor(color: Int) {
+        _gestureColor.value = color
+        sharedPref.edit().putInt("touch_color", color).apply()
     }
 
     fun startSettingPassword(uri: Uri) {
